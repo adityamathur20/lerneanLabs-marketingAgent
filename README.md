@@ -12,37 +12,72 @@ produces, and what is missing or risky about the current implementation.
 
 ## ⚠️ Security note — read this first
 
-Scanning the workflow JSON turned up **live credentials committed in plain
-text**:
+An earlier scan of the workflow JSON found **live credentials committed in
+plain text**: two Google Gemini API keys inline in `httpRequest` node URLs
+(`Gemini Vision API1`, `Gemini Generate SMS`), and a **Supabase
+`service_role` JWT** (bypasses Row Level Security entirely) inline in three
+nodes (`Query New Leads`, `POST → compliance-gate`, `Update Lead Stage`),
+all pointing at a specific live Supabase project.
 
-- Two Google Gemini API keys hardcoded directly in `httpRequest` node URLs
-  (nodes `Gemini Vision API1` and `Gemini Generate SMS`, inside the *Invoice
-  Digest* and *AI First Outreach* sections).
-- A **Supabase `service_role` JWT** (the key that bypasses Row Level Security
-  entirely) hardcoded in plain text in four places (`Query New Leads`,
-  `POST → compliance-gate`, `Update Lead Stage` — all in the *AI First
-  Outreach* section), pointing at a specific live Supabase project.
+**Status: the workflow-side fix is done. The actual key rotation is not —
+that part only you can do.** Here's the exact split:
 
-Everything else in the workflow correctly uses n8n's stored **credentials**
-(Google OAuth2, a generic `httpQueryAuth` credential for Gemini, an OpenAI
-credential) — only these five nodes bypass that and inline the secret.
-Since this repository is now public, treat those two API keys and that
-Supabase key as **compromised**:
+### ✅ Done in this repo (code-side fix)
+All five nodes have been switched from inline secrets to n8n's stored
+**credential** mechanism — the same pattern already used correctly by
+every other node in this workflow:
+- `Gemini Vision API1` and `Gemini Generate SMS` now use
+  `genericAuthType: httpQueryAuth`, pointing at the existing `Query Auth
+  account` credential (id `SCFIE3udZwAl5Kbz`) already used by 16 other
+  Gemini nodes in this file. No new credential setup needed for these two
+  — they'll pick up whatever key that credential already holds in your
+  n8n instance.
+- `Query New Leads`, `POST → compliance-gate`, and `Update Lead Stage` now
+  use `genericAuthType: httpCustomAuth`, pointing at a **new** credential
+  named `Supabase Service Role (Custom Auth)` (n8n's "Custom Auth"
+  credential type lets one credential inject multiple headers — needed
+  here since Supabase requires both `apikey` and `Authorization` headers
+  carrying the same JWT). This credential does **not exist yet** in your
+  n8n instance — see the setup step below.
+- The literal secret values are no longer present anywhere in the current
+  file (verified by grep after the edit — zero matches for either leaked
+  Gemini key or the JWT's payload signature).
 
-1. Rotate/regenerate the Gemini API key(s) in Google AI Studio / Cloud
-   Console.
-2. Rotate the Supabase `service_role` key for that project (Project
-   Settings → API), and audit the `leads` table / `compliance-gate` edge
-   function for unexpected access in the meantime.
-3. Replace the inline values in those 5 nodes with the same
-   `httpQueryAuth` / header-auth **credential** pattern already used
-   everywhere else in this workflow.
-4. Consider scrubbing git history, not just the current file — the keys
-   remain recoverable from old commits even after being removed from HEAD.
+### ❌ Still required from you (cannot be done from this repo alone)
+1. **Rotate both Gemini API keys** in Google AI Studio / Cloud Console —
+   the old ones are still valid until you revoke them, code changes here
+   don't invalidate a key.
+2. **Rotate the Supabase `service_role` key** for project
+   `snghubtnjwglqhuxlyss` (Project Settings → API → reset service_role
+   key), and check Supabase's logs for any access you don't recognize
+   since this repo went public.
+3. **In your n8n instance**, create the new credential:
+   - Type: **Custom Auth** (`httpCustomAuth`)
+   - Name: `Supabase Service Role (Custom Auth)` (must match exactly, or
+     just re-select whatever name you choose on each of the 3 nodes)
+   - Data (JSON): a header block carrying the **new, rotated** key twice:
+     ```json
+     { "headers": { "apikey": "<new service_role key>", "Authorization": "Bearer <new service_role key>" } }
+     ```
+   - Then open `Query New Leads`, `POST → compliance-gate`, and
+     `Update Lead Stage` in the imported workflow and re-select this
+     credential (the placeholder ID in the JSON won't auto-resolve to a
+     credential you create after the fact — that's a normal one-time
+     manual step in n8n after any credential swap).
+   - Also confirm the existing `Query Auth account` credential's stored
+     value is the **rotated** Gemini key, not the old leaked one — if
+     whoever built these two rogue nodes copy-pasted from the same key
+     already in that credential, it needs rotating too, not just the two
+     keys that were visibly hardcoded.
+4. **Git history still has the old secrets.** Removing them from the
+   current file (done) does not remove them from earlier commits — anyone
+   can still recover the old values from this repo's history. Scrubbing
+   history (e.g. `git filter-repo` + force-push) is a separate, more
+   invasive step; it hasn't been done here and needs your explicit
+   go-ahead since it rewrites shared history.
 
-This is not addressed further below except where relevant to a specific
-automation's data flow — the actual key values are intentionally **not**
-reproduced anywhere in this README.
+The actual secret values are intentionally **not** reproduced anywhere in
+this README, in commit messages, or in `AGENTS.md`.
 
 ---
 
@@ -217,9 +252,11 @@ Each section below covers: **Trigger (input)** → **Data sources read** →
 - **Data sources:** Whatever PDFs land in the watched Drive folder.
 - **Output:** Verified/Flagged sheet rows, sorted Drive folders, one daily
   summary email.
-- **Notes:** This is the section with one of the hardcoded Gemini API keys
-  (see security note above). No OCR fallback if Gemini's JSON response
-  fails to parse — falls back to an all-null/flagged result, which is
+- **Notes:** This was the section with one of the hardcoded Gemini API keys
+  — **now fixed** to use the shared n8n credential (see security note
+  above); the key itself still needs rotating in Google Cloud Console. No
+  OCR fallback if Gemini's JSON response fails to parse — falls back to an
+  all-null/flagged result, which is
   reasonable defensive behavior.
 
 ### 8. AI First Outreach (compliance-gate routed)
@@ -231,21 +268,27 @@ Each section below covers: **Trigger (input)** → **Data sources read** →
   a Supabase **Edge Function** called `compliance-gate` with flags like
   `defer_if_outside_hours: true` and `ai_disclosure_required: true`. The
   code explicitly notes the model is *not* asked to add "Reply STOP" —
-  the compliance-gate function appends that (and presumably enforces
-  TCPA quiet-hours/opt-out rules) server-side. Finally it PATCHes the
-  lead's `stage`/`next_action` back in Supabase based on whether the gate
-  reported the message as sent.
+  the compliance-gate function appends that server-side. The node's own
+  in-workflow note documents what that function does: checks `consent_sms`
+  and `is_dnc` (do-not-contact) flags, enforces recipient-local quiet
+  hours (8am–9pm), appends the AI-disclosure/STOP suffix, **sends via
+  Twilio**, and writes `consent_log` + `conversations` + `events` records
+  for audit. Finally, this n8n flow PATCHes the lead's `stage`/
+  `next_action` back in Supabase based on whether the gate reported the
+  message as sent — deliberately kept as a separate step outside the gate
+  so retry scheduling isn't coupled to the compliance logic.
 - **Data sources:** A Supabase `leads` table (real estate lead DB), not
   visible in this repo — schema/tenant logic lives entirely in Supabase.
-- **Output:** Lead stage updates in Supabase; the actual SMS **send**
-  itself happens *inside* the external `compliance-gate` Edge Function,
-  which is not part of this n8n workflow or this repository — this
-  workflow only prepares the message and hands it off.
-- **Notes:** This is the section with the hardcoded Supabase service-role
-  key and the second hardcoded Gemini key (see security note). Because the
-  actual SMS delivery logic lives in an opaque external function, this
-  workflow cannot itself confirm delivery beyond whatever the gate's HTTP
-  response reports.
+- **Output:** Lead stage updates in Supabase; the actual SMS send happens
+  *inside* the external `compliance-gate` Edge Function via Twilio, which
+  is not part of this n8n workflow or this repository — this workflow only
+  prepares the message and hands it off.
+- **Notes:** This was the section with the hardcoded Supabase service-role
+  key and the second hardcoded Gemini key — **now fixed** to use n8n
+  credentials (see security note). The compliance/delivery logic itself
+  still lives entirely in the external Edge Function, so this workflow
+  can't independently verify delivery beyond whatever the gate's HTTP
+  response reports — that function's source isn't in this repo.
 
 ### 9. AI Proposal & Invoice Autopilot
 - **Trigger:** Form — "AI Proposal And Invoice" (client name, company,
@@ -289,14 +332,14 @@ Each section below covers: **Trigger (input)** → **Data sources read** →
 
 | Integration | How it's used | Auth pattern |
 |---|---|---|
-| **Google Gemini API** (`gemini-2.5-flash-lite`, `gemini-2.5-flash`, `gemini-2.5-flash-image`, `gemini-2.0-flash`) | Copywriting, market/festival intelligence, QA review, image generation, invoice OCR, SMS drafting — called via raw `HTTP Request` nodes (no native Gemini node) | Stored `httpQueryAuth` credential ("Query Auth account") on ~18 nodes; **hardcoded key in URL on 2 nodes** (flagged above) |
+| **Google Gemini API** (`gemini-2.5-flash-lite`, `gemini-2.5-flash`, `gemini-2.5-flash-image`, `gemini-2.0-flash`) | Copywriting, market/festival intelligence, QA review, image generation, invoice OCR, SMS drafting — called via raw `HTTP Request` nodes (no native Gemini node) | Stored `httpQueryAuth` credential ("Query Auth account") on all 20 Gemini nodes — the 2 that used to inline the key have been switched to this credential; the key itself still needs rotating |
 | **OpenAI** (`gpt-4o-mini`, `gpt-4o`) | Lead personalization, influencer content, proposal/invoice drafting, search-query generation, learning-doc synthesis | Native n8n `OpenAI` node + stored `openAiApi` credential ("n8n free OpenAI API credits") |
 | **Gmail** | Sending every outbound email across all 10 automations; also used to `get` a thread (read replies) in the Lead-Gen reply-gate logic | Stored `gmailOAuth2` credential |
 | **Google Sheets** | The de-facto database/CRM layer for the whole workflow — used for append/update/read across every automation (campaign logs, CRM rows, deliverable trackers, invoice ledgers, listing logs, calendars) | Stored `googleSheetsOAuth2Api` credential |
 | **Google Drive** | Campaign asset folders, image uploads, invoice download/move | Stored `googleDriveOAuth2Api` credential |
 | **Google Docs** | Creating + writing the Learning Machine's output document | Stored `googleDocsOAuth2Api` credential + a raw REST `batchUpdate` call |
 | **YouTube Data API v3** | Video search for the Learning Machine | Same generic `httpQueryAuth` credential as Gemini |
-| **Supabase** (Postgres REST + Edge Functions) | Real-estate lead table reads/updates, and a `compliance-gate` Edge Function that owns actual SMS delivery + TCPA compliance | **Hardcoded `service_role` JWT** in 4 nodes (flagged above) — no n8n credential used at all here |
+| **Supabase** (Postgres REST + Edge Functions) | Real-estate lead table reads/updates, and a `compliance-gate` Edge Function that checks consent/DNC/quiet-hours and sends via Twilio | Switched to a `httpCustomAuth` credential ("Supabase Service Role (Custom Auth)") on all 3 nodes — **credential still needs creating in your n8n instance with the rotated key** (see security note) |
 | **MCP servers** | **None used.** No MCP client/trigger nodes exist anywhere in this file. | n/a |
 
 ---
@@ -375,8 +418,13 @@ Each section below covers: **Trigger (input)** → **Data sources read** →
 
 ## Known gaps, risks, and things that are not actually working end-to-end
 
-1. **Hardcoded secrets in a public repo** — 2 Gemini API keys + a Supabase
-   `service_role` key. See the security section at the top; rotate these.
+1. **Hardcoded secrets in a public repo — code-side fix applied, rotation
+   still pending.** 2 Gemini API keys + a Supabase `service_role` key were
+   inline in node URLs/headers; all 5 nodes now use n8n credentials
+   instead. The old key values are still live until you rotate them in
+   Google Cloud Console / Supabase, and they're still recoverable from
+   this repo's git history. See the security section at the top for the
+   exact remaining steps.
 2. **Two automations don't actually reach real recipients as configured:**
    - Lead-Gen's three outreach emails are hardcoded to
      `teamlancemart@gmail.com` instead of each contact's real address.
@@ -679,10 +727,10 @@ analysis for future work sessions.
 
 ## Open questions for you
 
-- Do you want me to actually **fix** any of the original gaps (rotate/
-  replace the hardcoded secrets with proper n8n credentials, wire the real
-  recipient emails in Lead-Gen/Onboarding, add retry/error handling)
-  before or separately from building out the new capabilities above?
+- The hardcoded-secret nodes are now fixed to use n8n credentials (see the
+  security section) — do you want the **hardcoded test recipient emails**
+  in Lead-Gen/Onboarding wired to the real contact/client address next, or
+  should that wait until you decide which of A–F to build out?
 - Which of A–F (budgeting, competitor analysis, rich media input, Apollo,
   ads-platform publishing, lead qualification/closure) matters most right
   now? They're largely independent, but ads-platform publishing and

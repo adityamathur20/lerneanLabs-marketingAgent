@@ -57,23 +57,57 @@ What worked well:
    - `On form submission` (Proposal And Invoice) → Proposal & Invoice Autopilot (15 nodes)
    - `📋 What Do You Want to Learn?` → AI Learning Machine (12 nodes)
 
-## Critical — unresolved as of this writing
+## Critical — partially resolved, action still needed from the user
 
-**Hardcoded live secrets are still in the workflow JSON**, committed to
-this now-public repo:
-- 2 Google Gemini API keys, inline in `httpRequest` node URLs
-  (`Gemini Vision API1` in Invoice Digest, `Gemini Generate SMS` in AI
-  First Outreach).
-- A Supabase `service_role` JWT (bypasses RLS), inline in 4 nodes in AI
-  First Outreach (`Query New Leads`, `POST → compliance-gate`,
-  `Update Lead Stage`).
+**The code-side fix is done.** All 5 nodes that used to hardcode secrets
+now reference n8n stored credentials instead:
+- `Gemini Vision API1` and `Gemini Generate SMS` → `genericAuthType:
+  httpQueryAuth`, pointing at the existing `Query Auth account` credential
+  (id `SCFIE3udZwAl5Kbz`) already used by the other 16 Gemini nodes. No
+  new credential needed for these two.
+- `Query New Leads`, `POST → compliance-gate`, `Update Lead Stage` →
+  `genericAuthType: httpCustomAuth`, pointing at a **new** credential
+  named `Supabase Service Role (Custom Auth)` that does **not exist yet**
+  in the user's n8n instance (n8n's Custom Auth credential type was used
+  because Supabase needs both `apikey` and `Authorization` headers set to
+  the same JWT, and a single `httpHeaderAuth` credential only carries one
+  header). The node JSON has a placeholder credential ID
+  (`REPLACE_WITH_REAL_CREDENTIAL_ID`) that will show as "credential not
+  found" in n8n until the user creates the real credential and re-selects
+  it on all 3 nodes — this is expected and documented in the README
+  security section.
+- Verified by grep after editing: zero occurrences of either leaked
+  Gemini key or the JWT's payload signature remain anywhere in
+  `Complex Automations.json`.
 
-**As of this session, these have not been rotated or fixed** — this has
-been flagged to the user twice (in README and in chat) but no fix has been
-applied yet, pending user confirmation to proceed. If picking this up:
-check with the user whether rotation/fix has happened before assuming the
-repo is still exposed. Do not reproduce the actual key values in any
-future commit, doc, or chat output — describe by node name/location only.
+**What's still NOT done — cannot be done from this repo alone:**
+1. The actual key **rotation** — Google Cloud Console for the 2 Gemini
+   keys, Supabase Project Settings → API for the `service_role` key. Code
+   changes don't invalidate a key; the old values are still live until the
+   user revokes them.
+2. Checking Supabase logs for unexpected access since the repo went
+   public — the user needs to do this, no log access from here.
+3. Creating the new `Supabase Service Role (Custom Auth)` credential in
+   the user's live n8n instance and re-linking it on the 3 nodes (can't
+   be done from a git repo — n8n credentials are stored server-side in
+   the n8n instance, not in the exported workflow JSON).
+4. Confirming whether the existing `Query Auth account` credential's
+   stored value is itself one of the leaked keys (if whoever built the 2
+   rogue nodes copy-pasted from it) — if so it needs rotating too, not
+   just the 2 that were visibly hardcoded. Nobody has confirmed this
+   either way yet.
+5. **Git history still contains the old secret values** in the pre-fix
+   commits (`88f970a`, `d63387d`, `9e29030` on this branch, plus whatever
+   was on `main` before). Removing them from the current file does not
+   remove them from history. Scrubbing history (`git filter-repo` +
+   force-push) is a separate, more invasive action that has NOT been
+   done and needs the user's explicit go-ahead before attempting, since
+   it rewrites shared history and could break other clones/PRs.
+
+If picking this up: don't assume the secrets are safe just because the
+code fix landed — confirm with the user whether steps 1-5 above have
+happened. Do not reproduce the actual key values in any future commit,
+doc, or chat output — describe by node name/location only.
 
 ## Analysis performed so far (chronological)
 
@@ -135,17 +169,23 @@ future commit, doc, or chat output — describe by node name/location only.
      cost/credit visibility.
    - Full API/credential inventory table is in `README.md`.
 
-## Status: analysis only, no implementation yet
+## Status: one implementation change made; gap-analysis roadmap otherwise unbuilt
 
-Nothing in `Complex Automations.json` itself has been modified this
-session — only `README.md` and this file. No new nodes, credentials, or
-API integrations have been added to the workflow. The gap analysis is a
-roadmap, not a changelog.
+`Complex Automations.json` **has** been modified once: the 5
+hardcoded-secret nodes were switched to credential references (see above)
+— a minimal, targeted text-level edit (not a full re-serialize) so the
+diff stayed reviewable (`47 insertions(+), 27 deletions(-)`, only touching
+those 5 nodes). Everything else — the marketing-agent gap analysis
+(budgeting, competitor analysis, rich media input, Apollo, ads-platform,
+lead qualification/closure) — is still a roadmap, not implemented.
 
 ## Open decisions the user hasn't made yet
 
-- Whether/when to fix the hardcoded-secret issue (rotation + moving to
-  proper n8n credentials).
+- Whether/when to actually rotate the exposed keys and create the new
+  Supabase credential in their n8n instance (the workflow-JSON side is
+  fixed; the account-side actions in the list above are still pending).
+- Whether to scrub git history of the old secret values (destructive,
+  needs explicit confirmation before attempting).
 - Which of the 6 gap areas (budgeting / competitor analysis / rich media
   input / Apollo / ads-platform / lead qualification) to build first.
   README suggests budgeting + ads-platform as a natural coupled pair

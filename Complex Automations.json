@@ -6326,7 +6326,9 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=AIzaSyAijAvEtzSTjLR1B-YGqsn9_3cC1haJhx8",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify($json.payload) }}",
@@ -6341,7 +6343,13 @@
       "position": [
         6000,
         96
-      ]
+      ],
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "SCFIE3udZwAl5Kbz",
+          "name": "Query Auth account"
+        }
+      }
     },
     {
       "parameters": {
@@ -6852,17 +6860,11 @@
     {
       "parameters": {
         "url": "https://snghubtnjwglqhuxlyss.supabase.co/rest/v1/leads?stage=eq.new&phone=not.is.null&select=id,tenant_id,phone,full_name,source,location_preference,budget_max,notes",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            {
-              "name": "apikey",
-              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNuZ2h1YnRuandnbHFodXhseXNzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTYzODg1NywiZXhwIjoyMDkxMjE0ODU3fQ.v5mWWBmrAKAOIUgI24NU6Im1JN53qmbv20UflDD8a7M"
-            },
-            {
-              "name": "Authorization",
-              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNuZ2h1YnRuandnbHFodXhseXNzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTYzODg1NywiZXhwIjoyMDkxMjE0ODU3fQ.v5mWWBmrAKAOIUgI24NU6Im1JN53qmbv20UflDD8a7M"
-            },
             {
               "name": "Range",
               "value": "0-49"
@@ -6881,7 +6883,13 @@
         5504,
         1984
       ],
-      "notes": "Fetch up to 50 new leads with a phone number. We do NOT filter consent_sms or is_dnc here — those are checked inside compliance-gate so blocks get logged for audit instead of silently filtered out."
+      "notes": "Fetch up to 50 new leads with a phone number. We do NOT filter consent_sms or is_dnc here — those are checked inside compliance-gate so blocks get logged for audit instead of silently filtered out.",
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "REPLACE_WITH_REAL_CREDENTIAL_ID",
+          "name": "Supabase Service Role (Custom Auth)"
+        }
+      }
     },
     {
       "parameters": {
@@ -6912,7 +6920,9 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=AIzaSyCstu9d7IWZYoKAubPt1Xtx-92JdjewLYg",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -6936,7 +6946,13 @@
       "position": [
         6160,
         1984
-      ]
+      ],
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "SCFIE3udZwAl5Kbz",
+          "name": "Query Auth account"
+        }
+      }
     },
     {
       "parameters": {
@@ -6955,13 +6971,11 @@
       "parameters": {
         "method": "POST",
         "url": "https://snghubtnjwglqhuxlyss.supabase.co/functions/v1/compliance-gate",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            {
-              "name": "Authorization",
-              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNuZ2h1YnRuandnbHFodXhseXNzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTYzODg1NywiZXhwIjoyMDkxMjE0ODU3fQ.v5mWWBmrAKAOIUgI24NU6Im1JN53qmbv20UflDD8a7M"
-            },
             {
               "name": "Content-Type",
               "value": "application/json"
@@ -6988,23 +7002,23 @@
         6608,
         1984
       ],
-      "notes": "Single chokepoint for outbound SMS. Gate handles: consent_sms check, is_dnc check, recipient-local quiet hours (8a-9p), AI disclosure suffix, Twilio send, consent_log + conversations + events writes. neverError=true so a non-200 response (e.g. 404 LEAD_NOT_FOUND) flows through to Update Lead Stage instead of failing the whole flow."
+      "notes": "Single chokepoint for outbound SMS. Gate handles: consent_sms check, is_dnc check, recipient-local quiet hours (8a-9p), AI disclosure suffix, Twilio send, consent_log + conversations + events writes. neverError=true so a non-200 response (e.g. 404 LEAD_NOT_FOUND) flows through to Update Lead Stage instead of failing the whole flow.",
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "REPLACE_WITH_REAL_CREDENTIAL_ID",
+          "name": "Supabase Service Role (Custom Auth)"
+        }
+      }
     },
     {
       "parameters": {
         "method": "PATCH",
         "url": "https://snghubtnjwglqhuxlyss.supabase.co/rest/v1/leads?id=eq.{{ $('Build Gate Payload').first().json.lead_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            {
-              "name": "apikey",
-              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNuZ2h1YnRuandnbHFodXhseXNzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTYzODg1NywiZXhwIjoyMDkxMjE0ODU3fQ.v5mWWBmrAKAOIUgI24NU6Im1JN53qmbv20UflDD8a7M"
-            },
-            {
-              "name": "Authorization",
-              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNuZ2h1YnRuandnbHFodXhseXNzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTYzODg1NywiZXhwIjoyMDkxMjE0ODU3fQ.v5mWWBmrAKAOIUgI24NU6Im1JN53qmbv20UflDD8a7M"
-            },
             {
               "name": "Content-Type",
               "value": "application/json"
@@ -7030,7 +7044,13 @@
         6832,
         1984
       ],
-      "notes": "Stage transition is intentionally OUTSIDE compliance-gate — gate is single-purpose (TCPA + audit). On sent=true, lead becomes 'contacted' with next_action 24h out. On sent=false (any block reason), lead stays 'new' with retry scheduled in 1h."
+      "notes": "Stage transition is intentionally OUTSIDE compliance-gate — gate is single-purpose (TCPA + audit). On sent=true, lead becomes 'contacted' with next_action 24h out. On sent=false (any block reason), lead stays 'new' with retry scheduled in 1h.",
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "REPLACE_WITH_REAL_CREDENTIAL_ID",
+          "name": "Supabase Service Role (Custom Auth)"
+        }
+      }
     },
     {
       "parameters": {
