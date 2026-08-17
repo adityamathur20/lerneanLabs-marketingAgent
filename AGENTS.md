@@ -168,6 +168,46 @@ doc, or chat output — describe by node name/location only.
      into an `Execute Workflow` sub-workflow, add retry/backoff, add
      cost/credit visibility.
    - Full API/credential inventory table is in `README.md`.
+5. Extended the gap analysis with 9 more areas (G–O) after the user asked
+   "what else is missing to make this a full-fledged marketing agent."
+   Verified each against the JSON before writing (grepped for whatsapp,
+   unsubscribe/suppress, a/b test, pixel/gtag, shopify/woocommerce,
+   translate, chat trigger, consent/gdpr/dpdp) rather than assuming —
+   several near-misses turned up (e.g. "shopify" only appears as unrelated
+   placeholder example text in a dropdown, not an integration; "pixel" and
+   "gtag" have zero occurrences). One-line summary of each:
+   - **G. Multi-channel execution**: WhatsApp number is collected on
+     multiple forms but never used — no WhatsApp Business API integration
+     despite the budget-mix logic recommending it as a channel.
+   - **H. Suppression list**: emails say "reply 'remove' to unsubscribe"
+     but no code reads replies for opt-out language or maintains a
+     do-not-contact list — the SMS side has this (Supabase `is_dnc`), email
+     doesn't. Compliance risk (DPDP/CAN-SPAM), not just UX.
+   - **I. A/B testing isn't real**: prompts ask the LLM for "3 variants to
+     A/B test" but nothing ever splits traffic or measures a winner — it's
+     variant generation, not a test harness.
+   - **J. No conversion tracking**: zero Pixel/GA4/conversions-API
+     anywhere — even with ads + budget tracking, the funnel goes dark at
+     "clicked."
+   - **K. No owned landing pages**: everything generated is placed
+     elsewhere; no page-builder integration, so campaigns have no
+     trackable destination.
+   - **L. No brand kit**: every form re-describes the brand from scratch,
+     no persistent brand profile, no claims-check for regulated categories
+     (e.g. Health & Wellness under India's ASCI guidelines).
+   - **M. No performance memory**: every campaign starts from zero; past
+     winning angles/creatives never feed back into future generation
+     prompts.
+   - **N. No draft/review step**: beyond the ad-spend approval gate (gap
+     E), there's no general approve-before-send checkpoint anywhere — only
+     the LLM's self-graded QA agent, which isn't independent review.
+   - **O. No multi-tenant isolation**: built to be sold to multiple
+     clients (pricing baked into form copy) but all clients share one set
+     of credentials/Sheets/Drive with no `tenant_id` scoping anywhere.
+   - New APIs surfaced: WhatsApp Business Platform API, Instagram Graph/
+     LinkedIn API (direct posting), Meta Pixel + Conversions API, GA4
+     Measurement Protocol, Unbounce/Webflow/static-hosting APIs for
+     landing pages. Added to the credential inventory table in `README.md`.
 
 ## Status: one implementation change made; gap-analysis roadmap otherwise unbuilt
 
@@ -186,11 +226,13 @@ lead qualification/closure) — is still a roadmap, not implemented.
   fixed; the account-side actions in the list above are still pending).
 - Whether to scrub git history of the old secret values (destructive,
   needs explicit confirmation before attempting).
-- Which of the 6 gap areas (budgeting / competitor analysis / rich media
-  input / Apollo / ads-platform / lead qualification) to build first.
-  README suggests budgeting + ads-platform as a natural coupled pair
-  (you need the ledger before you can safely auto-publish spend) but this
-  is a suggestion, not a decision.
+- Which of the 15 gap areas (A–O — see `README.md`'s gap-analysis section)
+  to build first. README suggests budgeting + ads-platform (A + E) as a
+  natural coupled pair (you need the ledger before you can safely
+  auto-publish spend) but this is a suggestion, not a decision. G–O are
+  what separate "runs one real campaign" from "is actually a full-fledged,
+  ongoing marketing agent" — worth deciding whether those matter for v1 or
+  are deliberately later-phase.
 - Which CRM (HubSpot vs Pipedrive vs Zoho) and which ad platform (Meta vs
   Google vs LinkedIn) to wire up first — each needs its own app
   registration/approval, so this gates real implementation start.

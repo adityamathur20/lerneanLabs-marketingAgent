@@ -473,11 +473,16 @@ Each section below covers: **Trigger (input)** → **Data sources read** →
 ## Gap analysis: this vs. a real marketing agent
 
 The 10 automations above generate **campaign content** (copy, images,
-emails). They do **not** do the parts of marketing that require real data
-or real money movement: competitor research, budget planning/pacing, ad
-publishing, or lead qualification/closure. This section is a precise,
-per-capability breakdown of the current state, what's missing, and what it
-would take to add it — including specific APIs.
+emails). They do **not** do the parts of marketing that require real data,
+real money movement, or persistence across runs: competitor research,
+budget planning/pacing, ad publishing, lead qualification/closure, or any
+form of channel execution beyond email and narrow SMS. This section is a
+precise, per-capability breakdown across 15 areas (A–O) of the current
+state, what's missing, and what it would take to add it — including
+specific APIs. A–F cover the core "run a campaign with real data and real
+spend" gaps; G–O cover what's additionally missing to call this a
+full-fledged, ongoing marketing agent rather than a one-shot content
+generator.
 
 ### A. Budgeting
 
@@ -671,9 +676,190 @@ has a generous free tier), Calendly API or Google Calendar API, Slack API
 (shared with the ads-approval gate above), and AI classification reuses
 the existing Gemini/OpenAI credential (no new API needed).
 
+### G. Multi-channel execution (WhatsApp especially)
+
+**Current state:** Several forms collect a "Brand Owner WhatsApp (with
+country code)" field, and the D2C budget-mix logic *recommends*
+`whatsapp` as a channel in its generated advice — but there's no WhatsApp
+Business API integration anywhere in the file. The number is captured and
+never used for anything. More broadly, email (and, narrowly, SMS via the
+Supabase-routed real-estate flow) are the only channels this workflow can
+actually execute on, despite generating content that assumes a wider
+channel mix (organic social, influencer, WhatsApp, paid ads).
+
+**To add:** WhatsApp Business Platform API (Meta) integration for actual
+message sends, reusing the same compliance-gate pattern already built for
+SMS (consent check, quiet hours, opt-out). Extend similarly for any other
+channel the generated content assumes exists (e.g. actual social posting
+via Instagram Graph API / LinkedIn API instead of only emailing an image
+for a human to post manually).
+
+**APIs needed:** WhatsApp Business Platform API (Meta), Instagram Graph
+API / LinkedIn API for direct posting if automated publishing (not just
+asset generation) is wanted.
+
+### H. Suppression list / opt-out enforcement (email side)
+
+**Current state:** Every cold outreach email ends with "Reply 'remove' to
+unsubscribe," but no code node reads reply content for that keyword, and
+there's no persistent do-not-contact list. A lead who explicitly opts out
+of one campaign can still be emailed in a future one — nothing
+structurally prevents it. The SMS side has a real equivalent (Supabase's
+`is_dnc`/`consent_sms` fields, checked by `compliance-gate`); email has
+no equivalent mechanism at all. This is a compliance gap, not just UX —
+relevant under India's DPDP Act and CAN-SPAM-style unsubscribe
+requirements generally.
+
+**To add:** A shared `suppression_list` table (same Supabase instance
+used elsewhere) keyed by email address; a reply-content classifier (reuse
+the existing reply-gate pattern, but check for opt-out language, not just
+message count) that writes to it; and a lookup/filter step before *any*
+automation sends an email, across all 10 sections, not just Lead-Gen.
+
+### I. "A/B testing" is variant generation, not an actual test
+
+**Current state:** Copywriter prompts explicitly ask the LLM for "3
+variants to A/B test" (headlines, CTA buttons), but nothing in the
+workflow ever deploys multiple variants, splits traffic between them, or
+measures which one performs better. It's variant *generation*, with no
+test harness behind it.
+
+**To add:** Once ads-platform integration exists (gap E), a split-testing
+layer on top of it: traffic allocation across variant ad sets, a
+scheduled check against the Insights API for statistical significance,
+and automatic promotion of the winning variant (pause the losers,
+reallocate budget). This doesn't fall out of ads integration for free —
+it's a distinct piece of logic.
+
+**APIs needed:** Same ad-platform APIs as gap E (Meta/Google/LinkedIn
+Insights endpoints for the significance check) — no new API surface, but
+meaningfully more logic.
+
+### J. No conversion tracking
+
+**Current state:** Zero mentions of Meta Pixel, Google tag/GA4, or any
+conversion-tracking snippet anywhere in the file. Even once ads are
+published (gap E) and spend is tracked (gap A), the funnel goes dark at
+"did someone click" — there's no way to know if a click became a
+purchase, lead, or signup, only what the ad platform itself reports
+(impressions/clicks), which is not the same as an actual conversion.
+
+**To add:** Pixel/tag implementation guidance as part of campaign
+delivery — either inject a Meta Pixel/GA4 snippet into any landing page
+this workflow helps produce (see gap K), or, if pointing at a client's
+existing site, provide the tag + setup instructions as part of the
+delivered kit, plus a conversions-API (server-side) integration for
+platforms that support it (Meta Conversions API, Google Enhanced
+Conversions) so tracking survives ad blockers.
+
+**APIs needed:** Meta Pixel / Conversions API, Google Ads / GA4
+Measurement Protocol.
+
+### K. No owned conversion surface (landing pages)
+
+**Current state:** Every automation produces creative meant to be
+*placed elsewhere* — ad copy, social captions, emails — but none of them
+build an actual landing page or product page. There's no page-builder
+integration. Campaigns have no destination unless a human builds one
+outside this workflow entirely, which also means gap J (pixel tracking)
+has nowhere reliable to live.
+
+**To add:** A landing-page generation step (template + AI-generated copy
++ generated images assembled into a hosted page) via a page-builder API,
+with the pixel/tag from gap J baked in by default.
+
+**APIs needed:** Unbounce API, Webflow API, or a simpler self-hosted
+option (e.g. generate static HTML + deploy to Vercel/Netlify via their
+APIs).
+
+### L. No brand kit / consistency enforcement across campaigns
+
+**Current state:** Every form re-describes the brand from scratch each
+time (name, USPs, tone) with zero persistence — there's no central brand
+profile. Two campaigns for the same brand could come out with
+inconsistent voice or visual identity, and nothing checks generated
+output against approved brand colors/fonts/logo usage or against
+claim-substantiation rules. This matters concretely for the "Health &
+Wellness" product category option on the D2C form — health/wellness ad
+claims are regulated in India under ASCI guidelines, and nothing here
+checks generated copy for unsubstantiated claims before it ships.
+
+**To add:** A `brand_profile` record per client (colors, fonts, logo
+asset, approved tone descriptors, restricted/must-avoid claims) created
+once at onboarding and referenced by every subsequent campaign form for
+that client; a claims-check pass in the QA agent step that flags
+regulated-category copy against a basic disallowed-claims list before
+sending.
+
+**APIs needed:** None new — this is a data-modeling and prompt-injection
+change (pull brand profile into every generation prompt) plus a
+lightweight rules-based or LLM-based claims checker.
+
+### M. No performance-informed generation — the system has no memory
+
+**Current state:** Every campaign starts from a blank slate. Even once
+analytics/spend tracking exists (gaps A, E, J), nothing feeds "this
+angle/creative performed best for this brand or category last time" back
+into the next generation prompt. A real marketing agent should get
+smarter about a client over time; this one is stateless per run.
+
+**To add:** A `campaign_performance` table joining generated-asset
+metadata (angle, hook, image style) to downstream metrics (CTR, replies,
+conversions) once those exist; a retrieval step before each new campaign
+generation that pulls the client's best-performing past angles/creatives
+and includes them as few-shot context in the Agent 1/2 prompts.
+
+**APIs needed:** None new — this is a data-pipeline and prompting change
+using the credentials/APIs already listed elsewhere (Supabase + existing
+Gemini/OpenAI).
+
+### N. No draft/review step before content ships to the client
+
+**Current state:** Beyond the ad-spend approval gate already flagged
+under gap E, there's no general "here's a draft, approve or edit"
+checkpoint anywhere in the workflow. Every kit auto-generates and
+auto-emails straight to the agent/owner inbox, with only the LLM's own
+self-graded "QA Reviewer" agent as a check — which is the same model
+family grading its own homework, not an independent review. A bad AI
+claim, an off-brand image, or a factual error currently reaches the
+client with zero human opportunity to catch it first.
+
+**To add:** Insert a review/approval step between generation and send for
+every content-producing automation (not just the ones that spend ad
+budget) — e.g. deliver the draft to an internal Slack channel or a simple
+approval link first, require a sign-off (or auto-approve after N hours as
+a configurable fallback), then send. This reuses the same approval-gate
+pattern needed for gap E, generalized to all 10 automations.
+
+**APIs needed:** Slack API (shared with gap E), or a lightweight
+approval-link pattern using n8n's own Form/Wait-for-webhook nodes (no new
+external API required).
+
+### O. No multi-tenant isolation
+
+**Current state:** This workflow is built to be *sold* to multiple
+clients — pricing is baked directly into the form descriptions (e.g. "₹0
+cost, sellable at ₹1,50,000–₹5,00,000"). But there's no concept of
+separate client workspaces: everything runs through one shared set of
+credentials, Google Sheets, and Drive folders. Once real budgets and CRM
+data are flowing per client (gaps A and F), one client's leads, invoices,
+and ad spend aren't structurally walled off from another's — a workflow
+bug or a wrong sheet reference could leak one client's data into another
+client's output.
+
+**To add:** A `tenant_id`/`client_id` column on every shared data table
+(the Supabase migration already implied by gaps A, F, H, L, M gives a
+natural place to add this consistently), scoped Drive folder structure
+per client, and per-client credential scoping wherever a client's own ad
+account or CRM is being used directly (as opposed to the agency's own).
+
+**APIs needed:** None new — this is a data-modeling and access-control
+change layered on top of the Supabase migration already recommended
+elsewhere in this analysis.
+
 ### Architectural changes required across the board
 
-These apply regardless of which of A–F you tackle first:
+These apply regardless of which of A–O you tackle first:
 
 - **Move shared state off Google Sheets and onto Supabase/Postgres**
   (already used in one sub-flow). Sheets can't safely handle concurrent
@@ -716,8 +902,12 @@ These apply regardless of which of A–F you tackle first:
 | Video generation | Google Veo / Runway ML / Luma | API key | Paid, per-second/clip |
 | Asset storage/transforms | Cloudinary or AWS S3+GCS | API key / IAM | Images + video assets |
 | Currency conversion | exchangerate.host / Open Exchange Rates | API key (free tier exists) | Only needed for multi-currency |
-| Team alerts | Slack API | OAuth2 bot token | Approval gates + hot-lead alerts |
-| Shared state/DB | Supabase (already partly used) | n8n-stored credential (fix current hardcoding) | Replaces Sheets-as-CRM |
+| Team alerts | Slack API | OAuth2 bot token | Approval gates + hot-lead alerts, content-review checkpoints |
+| Shared state/DB | Supabase (already partly used) | n8n-stored credential (fix current hardcoding) | Replaces Sheets-as-CRM; also the natural home for suppression list, brand profiles, performance history, tenant scoping |
+| WhatsApp messaging | WhatsApp Business Platform API (Meta) | OAuth2 / access token | Requires Meta Business verification; number is already collected on forms but unused |
+| Direct social posting | Instagram Graph API / LinkedIn API | OAuth2 | Only needed if automating publish, not just asset generation |
+| Conversion tracking | Meta Pixel + Conversions API, Google GA4 / Enhanced Conversions | Pixel ID + access token / Measurement Protocol secret | Needed once any ad spend or landing page exists, to close the loop past "clicked" |
+| Landing pages | Unbounce API, Webflow API, or static hosting (Vercel/Netlify API) | API key / OAuth2 | Gives campaigns an owned, trackable destination |
 
 None of this is implemented yet — this is a gap analysis and a roadmap,
 not a changelog. See `AGENTS.md` for a condensed handoff summary of this
@@ -730,13 +920,18 @@ analysis for future work sessions.
 - The hardcoded-secret nodes are now fixed to use n8n credentials (see the
   security section) — do you want the **hardcoded test recipient emails**
   in Lead-Gen/Onboarding wired to the real contact/client address next, or
-  should that wait until you decide which of A–F to build out?
-- Which of A–F (budgeting, competitor analysis, rich media input, Apollo,
-  ads-platform publishing, lead qualification/closure) matters most right
-  now? They're largely independent, but ads-platform publishing and
-  budgeting are tightly coupled (you need the budget ledger before you can
-  safely auto-publish spend), so that pairing is a reasonable place to
-  start if you want a single coherent next milestone.
+  should that wait until you decide which of A–O to build out?
+- Which of A–O matters most right now? A–F (budgeting, competitor
+  analysis, rich media input, Apollo, ads-platform publishing, lead
+  qualification/closure) get you to "runs real campaigns with real data
+  and spend." G–O (multi-channel execution, suppression lists, real A/B
+  testing, conversion tracking, landing pages, brand consistency,
+  performance memory, content review, multi-tenancy) get you the rest of
+  the way to an ongoing, trustworthy agent rather than a one-shot
+  generator. Ads-platform publishing and budgeting (E + A) are tightly
+  coupled — you need the ledger before you can safely auto-publish spend —
+  so that pairing is a reasonable place to start if you want a single
+  coherent first milestone.
 - Which CRM (HubSpot/Pipedrive/Zoho) and which ad platform (Meta/Google/
   LinkedIn) should be the first ones wired up? Each requires its own app
   registration/approval process, so picking one to start keeps the first
