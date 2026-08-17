@@ -422,12 +422,277 @@ Each section below covers: **Trigger (input)** → **Data sources read** →
 
 ---
 
+## Gap analysis: this vs. a real marketing agent
+
+The 10 automations above generate **campaign content** (copy, images,
+emails). They do **not** do the parts of marketing that require real data
+or real money movement: competitor research, budget planning/pacing, ad
+publishing, or lead qualification/closure. This section is a precise,
+per-capability breakdown of the current state, what's missing, and what it
+would take to add it — including specific APIs.
+
+### A. Budgeting
+
+**Current state:** Not absent, but cosmetic. The D2C form has a "Marketing
+Budget (Monthly)" field, and `🔧 Parse + Enrich + Campaign ID + UTM` maps it
+to a **hardcoded channel-mix percentage table** (e.g. "Bootstrap" →
+`{organic_social: 60, influencer: 20, whatsapp: 15, paid_ads: 5}`). That's
+static advice baked into copy, not budget management. There is no tracked
+spend, no per-channel dollar ledger, no pacing, no cap enforcement, and no
+ROI. The Client Onboarding and Proposal forms also collect a budget number,
+but it's only ever used as text inside generated copy, never as a
+constraint or allocation input.
+
+**To add:**
+1. Structured budget fields on campaign forms: total budget, currency,
+   channel-priority weights, start/end dates (not just a tier dropdown).
+2. A **Budget Ledger** table — `campaign_id, channel, planned_amount,
+   spent_amount, currency, last_synced_at` — in Supabase/Postgres, not
+   Sheets (needs safe concurrent writes once multiple channels sync on a
+   schedule).
+3. A scheduled **Budget Sync** flow: pull actual spend from each ad
+   platform's reporting endpoint → update the ledger → alert (Slack/email)
+   if pacing drifts from plan or nears the cap.
+4. A **pre-publish budget gate**: before any ad is created, check
+   remaining ledger balance and block/warn if insufficient.
+5. A currency-conversion API if operating across markets (pricing here is
+   currently fixed to ₹).
+
+**APIs needed:** Meta Marketing API (Insights endpoint), Google Ads API
+(cost metrics via `GoogleAdsService`), LinkedIn Marketing API (Analytics
+Finder), a currency-conversion API (e.g. exchangerate.host), Slack API
+(alerts).
+
+### B. Competitor analysis
+
+**Current state:** Zero real data. `🧠 AGENT 1: Market Intelligence` and
+`🧠 AGENT 1: Festival Intelligence1` are Gemini calls prompted with only
+the 4–5 form fields (product name, category, description). The model
+invents plausible-sounding positioning and "competitor angles" from a
+one-paragraph brief — nothing is fetched, searched, or scraped.
+
+**To add:**
+1. A **Competitor Research** step before Agent 1: run a search query
+   (product category + "competitors"/"vs"/"alternative to") via a SERP
+   API; pull real competitor ad creative from Meta's public Ad Library API
+   (free); optionally scrape top competitor landing/product pages for
+   pricing and positioning claims.
+2. A parsing node that condenses raw results into a structured
+   `competitor_profile` JSON (name, price point, key claims, ad angle) and
+   feeds *that* into Agent 1's prompt instead of just the form text.
+3. Cache results per product category (e.g. 7-day TTL) so repeat
+   submissions in the same category don't re-pay for search calls.
+
+**APIs needed:** SerpAPI or DataForSEO (SERP results, paid per-search),
+Meta Ad Library Graph API (`ads_archive` endpoint, free but rate-limited),
+Firecrawl or ScraperAPI/Browserless (JS-rendered page scraping, paid),
+optionally SimilarWeb API for traffic/market-share estimates.
+
+### C. Product details / images / videos input
+
+**Current state:** Almost entirely text-only. Every form field across all
+10 automations is `string`/`dropdown`/`textarea` except one: the Real
+Estate form has a single optional **"Reference Image" file field** — and
+it's a dead input. No code node anywhere reads or forwards it; the file is
+captured on submission and then never used. Every generated image in this
+workflow is produced from a text prompt alone, with nothing anchoring it
+to the actual product's real appearance. No video is ever generated —
+the D2C form promises "reel video prompts," and that's literally all it
+produces: text prompts for a human to feed into a separate video tool.
+
+**To add:**
+1. Add real `fieldType: "file"` fields (n8n Form Trigger supports
+   multi-file upload) to every content-generation form: product photos,
+   brand logo, brand guideline PDF, existing creative examples.
+2. On submission, upload files to Drive/S3 and pass them as inline image
+   data to Gemini's multimodal input alongside the text prompt — Gemini
+   2.5 Flash Image supports image-conditioned generation, so real product
+   photos can anchor generated visuals instead of the model free-inventing
+   an appearance.
+3. For video, two tiers:
+   - Lightweight: accept uploaded video, extract keyframes (ffmpeg via
+     Execute Command, or Cloudinary/Shotstack), feed frame descriptions
+     into the copywriter agent for accurate scripts.
+   - Full: integrate an actual text/image-to-video API (Google Veo,
+     Runway ML, Luma Dream Machine) so a real video gets produced instead
+     of only a prompt for one.
+4. Structured asset storage (S3/GCS or a Drive-folder-per-campaign
+   convention with a manifest row) so a brand's logo/reference photos can
+   be reused across that campaign's follow-on content instead of being
+   re-uploaded or re-invented each time.
+
+**APIs needed:** Cloudinary or AWS S3/GCS (storage/transforms), ffmpeg or
+a video API (Shotstack/Cloudinary Video) for keyframe work, Google Veo /
+Runway ML / Luma for actual video generation, Gemini multimodal (already
+in use) for image-conditioned generation.
+
+### D. Apollo integration (real, not a CSV)
+
+**Current state:** The Lead-Gen automation reads a Google Sheet literally
+named `apollo-contacts-export` — a **manual CSV export from Apollo.io that
+a human pastes in before running the campaign**. There is no Apollo API
+call anywhere in the 188 nodes; the list never refreshes on its own and
+there's no enrichment or verification step.
+
+**To add:**
+1. Replace the "Read Apollo Contacts Sheet" node with `HTTP Request` calls
+   to Apollo's People Search API (`POST /v1/mixed_people/search`) filtered
+   by ICP criteria (industry, title, company size, location) captured via
+   new campaign-brief form fields.
+2. Handle Apollo's pagination and **credit-based rate limits** — each
+   unlocked contact consumes paid credits, so `page`/`per_page` need to be
+   deliberately capped, and credit spend needs to be visible (ties into
+   the Budget section above).
+3. Add an email-verification pass — filter out Apollo's "unverified" /
+   "guessed" statuses, or run through a dedicated verifier
+   (ZeroBounce/NeverBounce) to cut bounce rate before sending.
+4. Persist results into the CRM/Sheet as today, but now as a **live,
+   re-runnable pull** instead of a static one-time export.
+
+**APIs needed:** Apollo.io REST API (requires a paid plan with API access
++ API key), optionally ZeroBounce or NeverBounce for verification.
+
+### E. Ads-platform integration
+
+**Current state:** None at all. No node in this workflow touches Meta
+Ads, Google Ads, or LinkedIn Ads. Every automation's "campaign" output is
+a folder of generated creative assets emailed to a human — nothing is
+ever published, targeted, or spent against. There's also no native n8n
+node for any ad platform in the base package; this would all be raw
+`HTTP Request` calls, the same pattern already used for Gemini.
+
+**To add:**
+1. Per-platform app registration + OAuth2 credentials: Meta Business (App
+   ID/Secret + long-lived token), Google Ads (Developer Token + OAuth2
+   client + linked Manager/Customer account — requires Google approval),
+   LinkedIn Marketing Developer Platform (requires LinkedIn approval).
+2. A **Campaign Builder** step mapping the already-generated creative kit
+   into each platform's structure: Campaign (objective, budget) → Ad
+   Set/Ad Group (targeting, schedule — can reuse the persona data already
+   generated by the existing agents) → Ad (creative = generated image +
+   generated copy).
+3. **A mandatory human-approval gate before publish.** This workflow
+   currently has zero human-in-the-loop steps anywhere — every output is
+   auto-sent. That's fine for generated content emailed to a human for
+   review, but not acceptable once a node can spend real ad budget. Insert
+   a Slack-approval or emailed-approval-link step between creative
+   generation and actual publish, gated on creative + targeting + budget
+   sign-off.
+4. A **performance-sync flow** (feeds the Budget Sync above): scheduled
+   pulls from each platform's Insights/Reporting API bringing spend,
+   impressions, clicks, and conversions back into the shared data store,
+   closing the loop this workflow currently has no version of at all.
+
+**APIs needed:** Meta Marketing API (Graph API — Campaign/AdSet/Ad/
+Insights endpoints), Google Ads API (v16+), LinkedIn Marketing API.
+
+### F. Lead generation, qualification & closure
+
+**Current state:** The Lead-Gen automation sends a fixed 3-email cadence.
+"Qualified" doesn't exist as a concept — a lead is either "replied" (Gmail
+thread has ≥2 messages, stopping the sequence) or not. There's no scoring,
+no pipeline stages beyond that binary, no meeting booking, no closure
+tracking, and no way to compute which campaign/channel actually produced
+revenue. The Proposal & Invoice Autopilot has a similar shallow
+stage-machine (`Proposal Sent` → one 3-day follow-up), but nothing beyond
+that, and no shared pipeline between the two automations.
+
+**To add:**
+1. **Qualification scoring**: on reply detected, run an AI classification
+   node (intent signal, budget/timeline mentioned, sentiment) to bucket
+   the lead Hot/Warm/Cold instead of just "replied."
+2. **A real CRM** instead of Sheets-as-CRM: push leads/deals into HubSpot,
+   Pipedrive, or Zoho via API with real pipeline stages (New → Contacted →
+   Replied → Qualified → Meeting Booked → Proposal Sent → Won/Lost) —
+   this generalizes the stage-machine idea already present in the
+   Proposal & Invoice automation into one shared pipeline.
+3. **Meeting booking**: on a Hot-qualified reply, auto-send a Calendly (or
+   Google Calendar API) booking link; capture the booked-meeting webhook
+   back into the CRM stage.
+4. **Human handoff**: Slack/email alert to the sales rep the moment a
+   lead is scored Hot, with the AI-generated context summary attached.
+5. **Closure tracking & attribution**: a CRM stage-change webhook
+   (Won/Lost) writes back to the Budget Ledger and campaign log, so
+   cost-per-lead and cost-per-close can finally be computed per
+   campaign/channel — the piece that actually closes the loop from
+   spend → lead → qualified → closed revenue, which nothing in the current
+   workflow does.
+
+**APIs needed:** HubSpot / Pipedrive / Zoho CRM API (pick one — HubSpot
+has a generous free tier), Calendly API or Google Calendar API, Slack API
+(shared with the ads-approval gate above), and AI classification reuses
+the existing Gemini/OpenAI credential (no new API needed).
+
+### Architectural changes required across the board
+
+These apply regardless of which of A–F you tackle first:
+
+- **Move shared state off Google Sheets and onto Supabase/Postgres**
+  (already used in one sub-flow). Sheets can't safely handle concurrent
+  writes once budget-sync, ads-sync, and lead-scoring are all writing on
+  independent schedules.
+- **Fix the existing hardcoded-secret issue before adding more paid API
+  keys.** More integrations means more secrets in play; credential
+  hygiene has to be solved first, not layered under.
+- **Introduce a human-approval gate as a first-class, reusable pattern.**
+  The workflow currently has none anywhere. It's required before any
+  ad-spend action and strongly recommended before bulk outreach sends.
+- **De-duplicate the repeated 4-agent pipeline.** D2C and Festival each
+  hard-copy the entire Market Intel → Copy → Image → QA pattern as
+  separate nodes. Extracting it into a reusable n8n sub-workflow
+  (`Execute Workflow` node) means a competitor-research step, budget gate,
+  or ads-publish step only has to be built once and every
+  campaign-generating automation can call it.
+- **Add retry/backoff and rate-limit handling.** Paid APIs (Apollo
+  credits, SERP quota, ad-platform calls) cost money per call, and
+  nothing in the current workflow retries or backs off on failure.
+- **Add cost/credit visibility for the AI + data APIs themselves.**
+  There's currently no way to see what a given campaign run actually cost
+  to produce (Gemini/OpenAI tokens, Apollo credits, SERP queries) — worth
+  tracking in the same ledger as ad spend.
+
+### New API/credential inventory
+
+| Need | API | Auth | Notes |
+|---|---|---|---|
+| Competitor search | SerpAPI or DataForSEO | API key | Paid, per-search |
+| Competitor ad intel | Meta Ad Library (`ads_archive`) | App token | Free, rate-limited |
+| Page scraping | Firecrawl / ScraperAPI | API key | Paid |
+| Prospect data | Apollo.io API | API key | Paid plan w/ API access, credit-based |
+| Email verification | ZeroBounce / NeverBounce | API key | Paid, per-verification |
+| Meta Ads | Meta Marketing API (Graph API) | OAuth2 (long-lived token) | Requires Meta Business verification |
+| Google Ads | Google Ads API | OAuth2 + Developer Token | Requires Google Ads Manager approval |
+| LinkedIn Ads | LinkedIn Marketing API | OAuth2 | Requires LinkedIn Marketing Developer Platform approval |
+| CRM | HubSpot / Pipedrive / Zoho API | OAuth2 or API key | Pick one; HubSpot has a free tier |
+| Meeting booking | Calendly API or Google Calendar API | OAuth2/API key | Google Calendar credential already usable in this n8n environment |
+| Video generation | Google Veo / Runway ML / Luma | API key | Paid, per-second/clip |
+| Asset storage/transforms | Cloudinary or AWS S3+GCS | API key / IAM | Images + video assets |
+| Currency conversion | exchangerate.host / Open Exchange Rates | API key (free tier exists) | Only needed for multi-currency |
+| Team alerts | Slack API | OAuth2 bot token | Approval gates + hot-lead alerts |
+| Shared state/DB | Supabase (already partly used) | n8n-stored credential (fix current hardcoding) | Replaces Sheets-as-CRM |
+
+None of this is implemented yet — this is a gap analysis and a roadmap,
+not a changelog. See `AGENTS.md` for a condensed handoff summary of this
+analysis for future work sessions.
+
+---
+
 ## Open questions for you
 
-- Do you want me to actually **fix** any of the gaps above (rotate/replace
-  the hardcoded secrets with proper n8n credentials, wire the real
-  recipient emails in Lead-Gen/Onboarding, add retry/error handling)? I can
-  do that as a follow-up commit.
+- Do you want me to actually **fix** any of the original gaps (rotate/
+  replace the hardcoded secrets with proper n8n credentials, wire the real
+  recipient emails in Lead-Gen/Onboarding, add retry/error handling)
+  before or separately from building out the new capabilities above?
+- Which of A–F (budgeting, competitor analysis, rich media input, Apollo,
+  ads-platform publishing, lead qualification/closure) matters most right
+  now? They're largely independent, but ads-platform publishing and
+  budgeting are tightly coupled (you need the budget ledger before you can
+  safely auto-publish spend), so that pairing is a reasonable place to
+  start if you want a single coherent next milestone.
+- Which CRM (HubSpot/Pipedrive/Zoho) and which ad platform (Meta/Google/
+  LinkedIn) should be the first ones wired up? Each requires its own app
+  registration/approval process, so picking one to start keeps the first
+  milestone scoped.
 - Do you have the companion Google Sheets (Apollo contacts, Services/SOPs,
   Campaign CRM, etc.) or the Supabase `compliance-gate` function source
   somewhere else? Documenting their exact schemas would make this README
